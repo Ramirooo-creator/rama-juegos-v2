@@ -12,7 +12,7 @@ supabase = create_client(url, key)
 
 # Configurar IA con el modelo estable
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 st.set_page_config(page_title="Rama Juegos - IA Edition", layout="wide")
 st_autorefresh(interval=10000, key="datarefresh")
