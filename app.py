@@ -11,9 +11,8 @@ key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 
 # Configuración de Gemini (Usando el modelo con mayor compatibilidad)
-# Configuración de Gemini - RUTA ABSOLUTA PARA EVITAR 404
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('models/gemini-1.5-flash-latest') # Usamos el modelo más reciente y compatible
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Configuración de página y Auto-Refresh cada 10 seg
 st.set_page_config(page_title="Rama Juegos - IA Edition", layout="wide")
