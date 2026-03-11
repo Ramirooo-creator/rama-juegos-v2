@@ -10,10 +10,11 @@ url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 
-# Configurar IA con el modelo estable
+# Configuración de Gemini (Usando el modelo con mayor compatibilidad)
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 
+# Configuración de página y Auto-Refresh cada 10 seg
 st.set_page_config(page_title="Rama Juegos - IA Edition", layout="wide")
 st_autorefresh(interval=10000, key="datarefresh")
 
@@ -39,106 +40,107 @@ st.markdown("""
     .cancha-container {
         background-image: url('https://images.unsplash.com/photo-1556056504-51717364d019?q=80&w=2000');
         background-size: cover; border: 2px solid white; border-radius: 15px; padding: 15px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     .player-card {
         background: rgba(0, 0, 0, 0.85); border: 1px solid #D4AF37; border-radius: 8px;
-        color: white; padding: 5px; text-align: center; min-height: 60px;
+        color: white; padding: 8px; text-align: center; min-height: 70px; margin-bottom: 5px;
     }
+    .card-name { font-size: 13px; font-weight: bold; }
+    .card-pos { color: #D4AF37; font-size: 10px; font-weight: bold; }
     .ia-relato {
         background-color: #1c2128; border-left: 5px solid #D4AF37;
         padding: 20px; border-radius: 10px; font-style: italic; color: #e6edf3;
         line-height: 1.6;
     }
+    /* Estilo botón reinicio */
+    div.stButton > button:first-child { background-color: #d32f2f; color: white; border: none; }
     </style>
     """, unsafe_allow_html=True)
 
-# 4. LÓGICA DE JUEGO
-st.markdown("<h1 style='text-align: center; color: #D4AF37;'>🏆 RAMA JUEGOS: IA EDITION</h1>", unsafe_allow_html=True)
-
+# 4. ENCABEZADO Y REINICIO
 col_t, col_r = st.columns([3, 1])
+with col_t:
+    st.markdown("<h1 style='color: #D4AF37;'>🏆 RAMA JUEGOS: IA EDITION</h1>", unsafe_allow_html=True)
 with col_r:
     if st.button("🔥 REINICIAR PARTIDA"):
         actualizar_nube({"equipo_ram": {}, "equipo_amigo": {}, "club_actual": "BARCELONA"})
+        st.success("¡Reseteado!")
         st.rerun()
 
 usuario = st.radio("Manager en control:", ["Ram", "Amigo"], horizontal=True)
 estado = obtener_estado()
 
-MAPEO = {"GK": ["GK"], "LB": ["LB"], "RB": ["RB"], "CT": ["CT 1", "CT 2"], "MCD": ["MCD"], "MC": ["MC 1", "MC 2"], "LW": ["LW"], "RW": ["RW"], "ST": ["ST"]}
+# MAPEO TÁCTICO 4-3-3
+MAPEO = {
+    "GK": ["GK"], "LB": ["LB"], "RB": ["RB"], "CT": ["CT 1", "CT 2"],
+    "MCD": ["MCD"], "MC": ["MC 1", "MC 2"], "LW": ["LW"], "RW": ["RW"], "ST": ["ST"]
+}
 
+# 5. LÓGICA DE FICHAJES
 if estado:
     equipo_propio = estado['equipo_ram'] if usuario == "Ram" else estado['equipo_amigo']
     
-    # BUSCADOR DE JUGADORES
+    st.divider()
+    
     if len(equipo_propio) < 11:
         club = estado['club_actual']
-        st.markdown(f"### 🚩 Club Asignado: **{club}**")
-        nombres = [j['nombre'] for j in DB.get(club, [])]
-        seleccion = st.selectbox("Elige tu próximo fichaje:", [""] + nombres)
+        st.markdown(f"### 🚩 Club asignado: **{club}**")
+        nombres_jugadores = [j['nombre'] for j in DB.get(club, [])]
+        seleccion = st.selectbox("Busca y elige un jugador:", [""] + nombres_jugadores)
         
         if seleccion:
             info = next(j for j in DB[club] if j['nombre'] == seleccion)
             slots_libres = [s for p in info['posiciones'] if p in MAPEO for s in MAPEO[p] if s not in equipo_propio]
             
-            if slots_libres:
-                pos = st.radio("Posición en el campo:", slots_libres, horizontal=True)
-                if st.button(f"CONFIRMAR A {seleccion.upper()}"):
-                    campo = "equipo_ram" if usuario == "Ram" else "equipo_amigo"
-                    equipo_propio[pos] = seleccion
-                    nuevo_club = random.choice(list(DB.keys()))
-                    actualizar_nube({campo: equipo_propio, "club_actual": nuevo_club})
-                    st.rerun()
+            if not slots_libres:
+                st.error("⚠️ Este jugador no tiene lugar en tu formación.")
             else:
-                st.error("Este jugador no tiene lugar en tu formación actual.")
+                pos_final = st.radio(f"Ubicar a {seleccion} en:", slots_libres, horizontal=True)
+                if st.button(f"CONFIRMAR FICHAJE"):
+                    campo_bd = "equipo_ram" if usuario == "Ram" else "equipo_amigo"
+                    equipo_propio[pos_final] = seleccion
+                    nuevo_club = random.choice(list(DB.keys()))
+                    actualizar_nube({campo_bd: equipo_propio, "club_actual": nuevo_club})
+                    st.balloons()
+                    st.rerun()
+    else:
+        st.success(f"✅ ¡{usuario}, tu 11 está listo!")
 
-    # --- 5. LAS DOS CANCHAS ---
+    # --- 6. VISUALIZACIÓN DE LAS DOS CANCHAS ---
     st.divider()
-    c1, c2 = st.columns(2)
+    col_izq, col_der = st.columns(2)
 
-    def dibujar_cancha(equipo, titulo):
+    def dibujar_cancha(equipo, titulo, color_borde):
         st.markdown(f"<h3 style='text-align:center;'>{titulo}</h3>", unsafe_allow_html=True)
         with st.container():
-            st.markdown('<div class="cancha-container">', unsafe_allow_html=True)
-            for fila in [["LW", "ST", "RW"], ["MC 1", "MCD", "MC 2"], ["LB", "CT 1", "CT 2", "RB"], ["GK"]]:
+            st.markdown(f'<div class="cancha-container" style="border-color: {color_borde};">', unsafe_allow_html=True)
+            filas = [["LW", "ST", "RW"], ["MC 1", "MCD", "MC 2"], ["LB", "CT 1", "CT 2", "RB"], ["GK"]]
+            for fila in filas:
                 cols = st.columns(len(fila))
                 for i, p in enumerate(fila):
                     with cols[i]:
-                        n = equipo.get(p, "—")
-                        st.markdown(f"<div class='player-card'><small>{p}</small><br><b>{n}</b></div>", unsafe_allow_html=True)
+                        nombre = equipo.get(p, "—")
+                        st.markdown(f"<div class='player-card'><div class='card-pos'>{p}</div><div class='card-name'>{nombre}</div></div>", unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-    with c1: dibujar_cancha(estado['equipo_ram'], "🟦 TEAM RAM")
-    with c2: dibujar_cancha(estado['equipo_amigo'], "🟥 TEAM AMIGO")
+    with col_izq: dibujar_cancha(estado['equipo_ram'], "🟦 TEAM RAM", "#3b82f6")
+    with col_der: dibujar_cancha(estado['equipo_amigo'], "🟥 TEAM AMIGO", "#ef4444")
 
-    # --- 6. SIMULADOR CON IA (CORREGIDO) ---
+    # --- 7. SIMULADOR CON IA ---
     st.divider()
     if len(estado['equipo_ram']) == 11 and len(estado['equipo_amigo']) == 11:
         st.markdown("### 🤖 Sala de Prensa: Análisis de Gemini Pro")
         if st.button("✨ SIMULAR PARTIDO FINAL"):
-            with st.spinner("Gemini está analizando las tácticas y simulando el partido..."):
+            with st.spinner("Gemini está analizando las plantillas..."):
                 try:
                     prompt_ia = f"""
-                    Actúa como un relator de fútbol argentino épico y analista técnico. 
-                    Se enfrentan dos equipos en la gran final:
+                    Narra una final de fútbol épica entre:
                     TEAM RAM: {list(estado['equipo_ram'].values())}
                     TEAM AMIGO: {list(estado['equipo_amigo'].values())}
-                    
-                    Instrucciones:
-                    1. Resultado final emocionante (ej: 3-2 o 1-0 en el último minuto).
-                    2. Narra 2 jugadas clave usando habilidades reales de los jugadores.
-                    3. Nombra al jugador del partido.
-                    4. Usa jerga futbolera argentina (caño, al ángulo, la descosió, etc.).
+                    Da un resultado, describe 2 jugadas y nombra la figura. Usa jerga de fútbol argentino.
                     """
-                    
-                    respuesta = model.generate_content(
-                        prompt_ia,
-                        safety_settings={
-                            'HATE': 'BLOCK_NONE',
-                            'HARASSMENT': 'BLOCK_NONE',
-                            'SEXUAL' : 'BLOCK_NONE',
-                            'DANGEROUS' : 'BLOCK_NONE'
-                        }
-                    )
-                    st.markdown(f"<div class='ia-relato'>{respuesta.text}</div>", unsafe_allow_html=True)
+                    response = model.generate_content(prompt_ia)
+                    st.markdown(f"<div class='ia-relato'>{response.text}</div>", unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"Hubo un problema con la IA: {e}")
+                    st.error(f"Error de IA: {e}")
