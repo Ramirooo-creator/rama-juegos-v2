@@ -9,11 +9,11 @@ url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 
-# Configuración y Auto-Refresh (Cada 10 seg)
+# Configuración y Auto-Refresh cada 10 segundos para ver cambios del rival
 st.set_page_config(page_title="Rama Juegos - Duelo Live", layout="wide")
 st_autorefresh(interval=10000, key="datarefresh")
 
-# 2. CARGAR BASE DE DATOS 
+# 2. CARGAR BASE DE DATOS (681 jugadores)
 @st.cache_data
 def cargar_db():
     with open('jugadores.json', 'r', encoding='utf-8') as f:
@@ -28,78 +28,98 @@ def obtener_estado():
 def actualizar_nube(datos):
     supabase.table("partidas").update(datos).eq("id", 1).execute()
 
-# --- 3. ESTILOS VISUALES MEJORADOS ---
+# --- 3. ESTILOS VISUALES ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
     .cancha-container {
         background-image: url('https://images.unsplash.com/photo-1556056504-51717364d019?q=80&w=2000');
-        background-size: cover; border: 2px solid white; border-radius: 15px; padding: 15px;
+        background-size: cover; border: 3px solid white; border-radius: 15px; padding: 15px;
+        box-shadow: 0 0 20px rgba(0,0,0,0.5);
     }
     .player-card {
-        background: rgba(0, 0, 0, 0.75); border: 1px solid #D4AF37; border-radius: 5px;
-        color: white; padding: 5px; text-align: center; min-height: 55px; margin-bottom: 5px;
+        background: rgba(0, 0, 0, 0.85); border: 1px solid #D4AF37; border-radius: 8px;
+        color: white; padding: 8px; text-align: center; min-height: 70px; margin-bottom: 5px;
     }
-    .card-name { font-size: 11px; font-weight: bold; overflow: hidden; }
+    .card-name { font-size: 13px; font-weight: bold; }
+    .card-pos { color: #D4AF37; font-size: 10px; font-weight: bold; }
+    /* Botón de reinicio rojo */
+    div.stButton > button:first-child { background-color: #d32f2f; color: white; border: none; }
     </style>
     """, unsafe_allow_html=True)
 
-# 4. LÓGICA DE JUEGO
-st.markdown("<h1 style='text-align: center; color: #D4AF37;'>🏆 RAMA JUEGOS: EL DUELO</h1>", unsafe_allow_html=True)
-usuario = st.sidebar.radio(" MANAGER ACTUAL:", ["Ram", "Amigo"])
+# 4. ENCABEZADO Y BOTÓN DE REINICIO
+col_t, col_r = st.columns([3, 1])
+with col_t:
+    st.markdown("<h1 style='color: #D4AF37;'>🏆 RAMA JUEGOS: EL DUELO</h1>", unsafe_allow_html=True)
+with col_r:
+    st.write("") # Espaciador
+    if st.button("🔥 REINICIAR PARTIDA"):
+        actualizar_nube({"equipo_ram": {}, "equipo_amigo": {}, "club_actual": "BARCELONA"})
+        st.success("¡Partida reseteada!")
+        st.rerun()
+
+usuario = st.radio("¿Quién eres hoy?", ["Ram", "Amigo"], horizontal=True)
 estado = obtener_estado()
 
+# MAPEO TÁCTICO 4-3-3
 MAPEO = {
     "GK": ["GK"], "LB": ["LB"], "RB": ["RB"], "CT": ["CT 1", "CT 2"],
     "MCD": ["MCD"], "MC": ["MC 1", "MC 2"], "LW": ["LW"], "RW": ["RW"], "ST": ["ST"]
 }
 
+# 5. LÓGICA DE FICHAJES
 if estado:
     equipo_propio = estado['equipo_ram'] if usuario == "Ram" else estado['equipo_amigo']
     
-    # CONTROL DE FINALIZACIÓN
+    st.divider()
+    
     if len(equipo_propio) >= 11:
-        st.success(f"✅ ¡{usuario}, tu 11 ideal está completo!")
-        if st.sidebar.button("🔄 REINICIAR PARTIDA"):
-            actualizar_nube({"equipo_ram": {}, "equipo_amigo": {}, "club_actual": "BARCELONA"})
-            st.rerun()
+        st.success(f"✅ ¡{usuario}, tu 11 ideal está completo! Espera a que tu rival termine.")
     else:
-        # SECCIÓN DE FICHAR 
         club = estado['club_actual']
-        st.sidebar.info(f"Fichando del: {club}")
-        nombres = [j['nombre'] for j in DB.get(club, [])]
-        seleccion = st.sidebar.selectbox("Busca jugador:", [""] + nombres)
+        st.markdown(f"### 🚩 Club asignado: **{club}**")
+        
+        nombres_jugadores = [j['nombre'] for j in DB.get(club, [])]
+        seleccion = st.selectbox("Busca y elige un jugador:", [""] + nombres_jugadores)
         
         if seleccion:
             info = next(j for j in DB[club] if j['nombre'] == seleccion)
-            slots_libres = [s for p in info['posiciones'] if p in MAPEO for s in MAPEO[p] if s not in equipo_propio]
+            slots_libres = []
+            for p_pdf in info['posiciones']:
+                if p_pdf in MAPEO:
+                    for slot in MAPEO[p_pdf]:
+                        if slot not in equipo_propio:
+                            slots_libres.append(slot)
             
-            if slots_libres:
-                pos = st.sidebar.radio("Posición:", slots_libres, horizontal=True)
-                if st.sidebar.button("CONFIRMAR FICHAJE"):
-                    campo = "equipo_ram" if usuario == "Ram" else "equipo_amigo"
-                    equipo_propio[pos] = seleccion
-                    nuevo_club = random.choice(list(DB.keys()))
-                    actualizar_nube({campo: equipo_propio, "club_actual": nuevo_club})
-                    st.rerun()
+            if not slots_libres:
+                st.error("⚠️ No hay lugar para este jugador en tu formación.")
             else:
-                st.sidebar.error("Sin lugar en tu formación.")
+                pos_final = st.radio(f"Ubicar a {seleccion} en:", slots_libres, horizontal=True)
+                if st.button(f"CONFIRMAR FICHAJE"):
+                    campo_bd = "equipo_ram" if usuario == "Ram" else "equipo_amigo"
+                    equipo_propio[pos_final] = seleccion
+                    nuevo_club = random.choice(list(DB.keys()))
+                    actualizar_nube({campo_bd: equipo_propio, "club_actual": nuevo_club})
+                    st.balloons()
+                    st.rerun()
 
-    # --- 5. VISUALIZACIÓN DE DUELO (DOS CANCHAS) ---
+    # --- 6. VISUALIZACIÓN DE LAS DOS CANCHAS ---
+    st.divider()
     col_izq, col_der = st.columns(2)
 
-    def dibujar_cancha(equipo, titulo):
-        st.markdown(f"<h4 style='text-align:center;'>{titulo}</h4>", unsafe_allow_html=True)
+    def dibujar_cancha(equipo, titulo, color_borde):
+        st.markdown(f"<h3 style='text-align:center;'>{titulo}</h3>", unsafe_allow_html=True)
         with st.container():
-            st.markdown('<div class="cancha-container">', unsafe_allow_html=True)
+            st.markdown(f'<div class="cancha-container" style="border-color: {color_borde};">', unsafe_allow_html=True)
             filas = [["LW", "ST", "RW"], ["MC 1", "MCD", "MC 2"], ["LB", "CT 1", "CT 2", "RB"], ["GK"]]
             for fila in filas:
                 cols = st.columns(len(fila))
                 for i, p in enumerate(fila):
                     with cols[i]:
                         nombre = equipo.get(p, "—")
-                        st.markdown(f"<div class='player-card'><small>{p}</small><br><div class='card-name'>{nombre}</div></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='player-card'><div class='card-pos'>{p}</div><div class='card-name'>{nombre}</div></div>", unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
-    with col_izq: dibujar_cancha(estado['equipo_ram'], "🟦 TEAM RAM")
-    with col_der: dibujar_cancha(estado['equipo_amigo'], "🟥 TEAM AMIGO")
+    with col_izq: dibujar_cancha(estado['equipo_ram'], "🟦 TEAM RAM", "#3b82f6")
+    with col_der: dibujar_cancha(estado['equipo_amigo'], "🟥 TEAM AMIGO", "#ef4444")
